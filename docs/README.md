@@ -2,46 +2,53 @@
 
 The top-level [README](../README.md) is the high-level intro; everything below is for people (and agents) who need to go deeper.
 
-## Files
+## Mindmap
+
+### [mindmap.md](mindmap.md)
+Full system mindmap: every module, feature, and data flow in one Mermaid diagram. Start here for a bird's-eye view.
+
+## Feature Areas
+
+| Area | Overview |
+|------|----------|
+| [engine/](engine/overview.md) | Debounce buffer, turn control, liveness watchdog |
+| [cc-worker/](cc-worker/overview.md) | Claude Code subprocess management, crash recovery, session persistence |
+| [tools/](tools/overview.md) | 20 built-in MCP tools, tool framework, auto-discovery |
+| [database/](database/overview.md) | SQLite schema, migrations, messages/reminders CRUD |
+| [storage/](storage/overview.md) | Memory files, attachments, render PNGs, path safety |
+| [telegram-io/](telegram-io/overview.md) | Dispatcher, inbound flow, owner commands, attachments |
+| [access-control/](access-control/overview.md) | access.json policies, per-user rate limiting |
+| [security/](security/overview.md) | 6 invariants, secrets scrubber, input normalizer, path safety |
+| [skills/](skills/overview.md) | Agent Skills spec, built-in skills, self-reflection |
+| [config/](config/overview.md) | All env vars, timeouts, derived paths, file-based config |
+
+## Reference Files
 
 ### [documentation.md](documentation.md)
-The full technical manual for pyclaudir itself. Read this when you're
-modifying, debugging, or auditing the project.
-
-Covers: every env var, the four-process architecture in detail, how to
-add tools and skills, access control internals, memory + reminders,
-the four monitoring windows (live log, session replay, raw wire log,
-SQLite), the complete security model with all invariants, the manual
-end-to-end checklist, and the full repo layout.
+Full technical manual: every env var, four-process architecture, how to add tools and skills, security model with all invariants, monitoring, end-to-end checklist, repo layout.
 
 ### [tools.md](tools.md)
-The canonical list of every tool available to the bot — always-on
-pyclaudir built-ins, always-on Claude Code built-ins (web), and
-opt-in groups (subagents, shell, code, Jira, GitLab, GitHub). Also
-the canonical reference for [`plugins.json`](../plugins.json): the
-schema, how to plug in a new external MCP, how to disable a built-in
-tool you don't use, and how to hide a skill. Read this when deciding
-what capabilities to grant for your deployment.
+Canonical tool reference: always-on built-ins, opt-in groups, `plugins.json` schema, how to add an external MCP, how to disable a tool or skill.
 
 ### [deployment.md](deployment.md)
-Step-by-step guide for deploying pyclaudir to a VPS (Hetzner,
-DigitalOcean, Contabo…) using Docker, plus a continuous-deployment
-workflow. Read this when you're moving the bot from your laptop to a
-server, or wiring it into CI.
+VPS deployment via Docker + continuous-deployment workflow.
 
 ### [reference-architectures.md](reference-architectures.md)
-Notes on the two systems pyclaudir descends from: Anthropic's [official
-Telegram plugin](https://github.com/anthropics/claude-plugins-official/tree/main/external_plugins/telegram) and the [Rust Claudir](https://gist.github.com/nodir-t/da74c78281f203b0439609ebe5866f49). Read this *before*
-proposing architectural changes — it explains which patterns came from
-where and why, so you don't accidentally regress to a shape that's
-already been ruled out.
+Ancestry: Anthropic Telegram plugin + Rust Claudir. Read before proposing architectural changes.
 
-## Quick reference
+### [changelog.md](changelog.md)
+Session log for docs changes.
+
+## Quick Reference
 
 | You want to… | Read |
 |---|---|
-| Run the bot locally | [../README.md](../README.md) |
-| Decide which tools to enable | [tools.md](tools.md) |
-| Understand a specific env var or security rule | [documentation.md](documentation.md) |
+| Get a bird's-eye view | [mindmap.md](mindmap.md) |
+| Understand message flow end-to-end | [engine/overview.md](engine/overview.md) + [cc-worker/overview.md](cc-worker/overview.md) |
+| Add a new tool | [tools/overview.md](tools/overview.md) |
+| Change who can use the bot | [access-control/overview.md](access-control/overview.md) |
+| Understand the security model | [security/overview.md](security/overview.md) |
+| Add an external MCP | [tools.md](tools.md) |
 | Deploy to a server | [deployment.md](deployment.md) |
-| Propose a structural / architectural change | [reference-architectures.md](reference-architectures.md) then [documentation.md](documentation.md) |
+| Propose a structural change | [reference-architectures.md](reference-architectures.md) then [documentation.md](documentation.md) |
+| Run the bot locally | [../README.md](../README.md) |

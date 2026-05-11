@@ -31,6 +31,10 @@ class ChatMessage(BaseModel):
     #: not persisted. ``None`` for synthetic messages (reminders, etc.) that
     #: don't originate from a Telegram update.
     received_at_monotonic: float | None = Field(default=None, exclude=True)
+    #: Slack thread timestamp (e.g. ``"1614012345.001234"``). Set by the
+    #: Slack dispatcher on every inbound event so tools can reply in the
+    #: correct thread. ``None`` for Telegram messages.
+    thread_ts: str | None = Field(default=None, exclude=True)
     #: Names of input-normalization transforms that fired on this message
     #: (e.g. ``"zero_width_stripped"``, ``"bidi_stripped"``,
     #: ``"nfkc_changed"`` from :mod:`pyclaudir.input_normalizer`). Surfaced
@@ -38,6 +42,12 @@ class ChatMessage(BaseModel):
     #: envelope so it can refuse obfuscated requests on-character. Not
     #: persisted — lives only in-memory between dispatcher and engine.
     input_flags: frozenset[str] = Field(default_factory=frozenset, exclude=True)
+    #: Slack channel ID (e.g. ``"C01234567"``). Written to SQLite for
+    #: permalink construction; excluded from the CC worker XML envelope.
+    slack_channel_id: str | None = Field(default=None, exclude=True)
+    #: Slack message timestamp (e.g. ``"1614012345.001234"``). Written to
+    #: SQLite for permalink construction; excluded from the CC worker envelope.
+    slack_message_ts: str | None = Field(default=None, exclude=True)
 
 
 class ControlAction(BaseModel):

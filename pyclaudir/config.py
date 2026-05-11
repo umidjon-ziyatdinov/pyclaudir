@@ -1,9 +1,4 @@
-"""All settings for pyclaudir, read from environment variables.
-
-Every setting the bot uses is in this file. The rest of the code should
-get values by calling ``Config.from_env()`` — that way tests can build
-their own ``Config`` without touching environment variables.
-"""
+"""All settings for pyclaudir, loaded from environment variables via Config.from_env()."""
 
 from __future__ import annotations
 
@@ -55,6 +50,55 @@ def _float(name: str, default: float) -> float:
         raise RuntimeError(f"{name} must be a number, got {raw!r}") from exc
 
 
+def _resolve_auth(platform: str, slack_owner_id: str | None) -> tuple[str, int]:
+    import zlib
+
+    if platform != "slack":
+        return _required("TELEGRAM_BOT_TOKEN"), int(_required("PYCLAUDIR_OWNER_ID"))
+    tg_token = _env("TELEGRAM_BOT_TOKEN", "") or ""
+    owner_id = zlib.crc32(slack_owner_id.encode()) & 0x7FFFFFFF if slack_owner_id else 0
+    return tg_token, owner_id
+
+
+def _from_env_kwargs(
+    tg_token: str, owner_id: int, platform: str, slack_owner_id: str | None
+) -> dict:
+    cron = _env("PYCLAUDIR_SELF_REFLECTION_CRON", "30 8 * * *") or "30 8 * * *"
+    save_raw = _env("PYCLAUDIR_SAVE_CHANNEL_MESSAGES", "true") or "true"
+    return dict(
+        telegram_bot_token=tg_token,
+        owner_id=owner_id,
+        model=_required("PYCLAUDIR_MODEL"),
+        effort=_required("PYCLAUDIR_EFFORT"),
+        claude_code_bin=_env("CLAUDE_CODE_BIN", "claude") or "claude",
+        data_dir=Path(_env("PYCLAUDIR_DATA_DIR", "./data") or "./data").resolve(),
+        self_reflection_cron=cron,
+        debounce_ms=_int("PYCLAUDIR_DEBOUNCE_MS", 0),
+        rate_limit_per_min=_int("PYCLAUDIR_RATE_LIMIT_PER_MIN", 20),
+        attachment_max_bytes=_int("PYCLAUDIR_ATTACHMENT_MAX_BYTES", 20_000_000),
+        tool_error_max_count=_int("PYCLAUDIR_TOOL_ERROR_MAX_COUNT", 3),
+        tool_error_window_seconds=_float("PYCLAUDIR_TOOL_ERROR_WINDOW_SECONDS", 30.0),
+        progress_notify_seconds=_float("PYCLAUDIR_PROGRESS_NOTIFY_SECONDS", 60.0),
+        liveness_timeout_seconds=_float("PYCLAUDIR_LIVENESS_TIMEOUT_SECONDS", 300.0),
+        liveness_poll_seconds=_float("PYCLAUDIR_LIVENESS_POLL_SECONDS", 30.0),
+        crash_backoff_base=_float("PYCLAUDIR_CRASH_BACKOFF_BASE", 2.0),
+        crash_backoff_cap=_float("PYCLAUDIR_CRASH_BACKOFF_CAP", 64.0),
+        crash_limit=_int("PYCLAUDIR_CRASH_LIMIT", 10),
+        crash_window_seconds=_float("PYCLAUDIR_CRASH_WINDOW_SECONDS", 600.0),
+        platform=platform,
+        slack_bot_token=_env("SLACK_BOT_TOKEN"),
+        slack_app_token=_env("SLACK_APP_TOKEN"),
+        slack_owner_id=slack_owner_id,
+        openwebui_api_url=_env("OPENWEBUI_API_URL"),
+        openwebui_api_key=_env("OPENWEBUI_API_KEY"),
+        openwebui_kb_uuid=_env("OPENWEBUI_KB_UUID"),
+        atlassian_api_token=_env("ATLASSIAN_API_TOKEN"),
+        github_token=_env("GITHUB_TOKEN"),
+        slack_workspace_url=_env("SLACK_WORKSPACE_URL"),
+        save_channel_messages=save_raw.lower() not in {"false", "0", "no"},
+    )
+
+
 @dataclass(frozen=True)
 class Config:
     """All settings the bot uses at runtime."""
@@ -83,8 +127,8 @@ class Config:
     data_dir: Path
     #: When the daily self-reflection task runs. Standard cron format,
     #: in UTC time.
-    #: Env var: ``PYCLAUDIR_SELF_REFLECTION_CRON`` (default ``"0 0 * * *"``,
-    #: which means midnight UTC every day).
+    #: Env var: ``PYCLAUDIR_SELF_REFLECTION_CRON`` (default ``"30 8 * * *"``,
+    #: which means 08:30 UTC / 17:30 KST every day).
     self_reflection_cron: str
     #: How long to wait (in milliseconds) after a message before sending
     #: it to Claude. If more messages come in during this wait, they are
@@ -100,16 +144,24 @@ class Config:
     # Tool-group toggles (subagents / bash / code) live in
     # ``plugins.json`` ``tool_groups`` — single source of truth.
     # Boot-time only: edit the file and restart.
-    #: Per-file size cap (bytes) for inbound Telegram attachments. Files
-    #: larger than this are rejected without download. Photos and documents
-    #: both use this cap. 20 MB by default.
+    #: Per-file size cap (bytes) for inbound attachments. Files larger than
+    #: this are rejected without download. 20 MB by default.
     #: Env var: ``PYCLAUDIR_ATTACHMENT_MAX_BYTES`` (default 20_000_000).
     attachment_max_bytes: int
+    #: Which messaging platform to use. ``"telegram"`` (default) or
+    #: ``"slack"``. Env var: ``PYCLAUDIR_PLATFORM``.
+    platform: str
+    #: Slack Bot Token (``xoxb-...``). Required when ``platform="slack"``.
+    #: Env var: ``SLACK_BOT_TOKEN``.
+    slack_bot_token: str | None
+    #: Slack App-Level Token (``xapp-...``) for Socket Mode.
+    #: Required when ``platform="slack"``. Env var: ``SLACK_APP_TOKEN``.
+    slack_app_token: str | None
+    #: Slack User ID of the bot owner (e.g. ``"U012AB3CD"``).
+    #: Required when ``platform="slack"``. Env var: ``SLACK_OWNER_ID``.
+    slack_owner_id: str | None
 
     # ----- Settings for handling tool errors -----
-    # These control what happens when Claude is still running fine, but
-    # one of its tool calls keeps failing or the turn goes quiet.
-
     #: How many tool errors are allowed before the bot gives up. Used
     #: in two places: (1) inside one turn — too many failed tool calls
     #: stops the turn; (2) across turns — too many empty replies in a
@@ -128,10 +180,6 @@ class Config:
     progress_notify_seconds: float
 
     # ----- Settings for spotting a stuck Claude process -----
-    # A separate watcher checks if Claude has gone silent in the middle
-    # of a turn (no output, no tool activity). If yes, it kills Claude
-    # so the supervisor can start it again.
-
     #: Max seconds of silence allowed during a turn. If Claude produces
     #: no output and no tool activity for longer than this, the watcher
     #: kills it. Silence between turns (when the bot is idle) is fine
@@ -144,12 +192,6 @@ class Config:
     liveness_poll_seconds: float
 
     # ----- Settings for restarting Claude after a crash -----
-    # The supervisor watches the Claude process. When it exits, the
-    # supervisor waits a bit and starts it again. The wait gets longer
-    # after each crash. If too many crashes happen in a short time, the
-    # supervisor gives up and exits — and something outside (systemd,
-    # docker, etc.) is expected to restart the whole bot.
-
     #: How long to wait before the first restart, in seconds. Each
     #: extra crash doubles the wait (``base * 2^(n-1)``), up to
     #: ``crash_backoff_cap``. Smaller = recovers faster from a one-off
@@ -171,7 +213,16 @@ class Config:
     #: Env var: ``PYCLAUDIR_CRASH_WINDOW_SECONDS`` (default 600.0,
     #: which is 10 minutes).
     crash_window_seconds: float
-    
+
+    # ----- Wiki / RAG / external integration -----
+    openwebui_api_url: str | None = None  # OPENWEBUI_API_URL
+    openwebui_api_key: str | None = None  # OPENWEBUI_API_KEY
+    openwebui_kb_uuid: str | None = None  # OPENWEBUI_KB_UUID
+    atlassian_api_token: str | None = None  # ATLASSIAN_API_TOKEN
+    github_token: str | None = None  # GITHUB_TOKEN
+    slack_workspace_url: str | None = None  # SLACK_WORKSPACE_URL
+    save_channel_messages: bool = True  # PYCLAUDIR_SAVE_CHANNEL_MESSAGES
+
     # Derived paths
     db_path: Path = field(init=False)
     memories_dir: Path = field(init=False)
@@ -196,37 +247,14 @@ class Config:
 
     @classmethod
     def from_env(cls) -> "Config":
-        return cls(
-            telegram_bot_token=_required("TELEGRAM_BOT_TOKEN"),
-            owner_id=int(_required("PYCLAUDIR_OWNER_ID")),
-            model=_required("PYCLAUDIR_MODEL"),
-            effort=_required("PYCLAUDIR_EFFORT"),
-            claude_code_bin=_env("CLAUDE_CODE_BIN", "claude") or "claude",
-            data_dir=Path(_env("PYCLAUDIR_DATA_DIR", "./data") or "./data").resolve(),
-            self_reflection_cron=(
-                _env("PYCLAUDIR_SELF_REFLECTION_CRON", "0 0 * * *") or "0 0 * * *"
-            ),  
-            debounce_ms=_int("PYCLAUDIR_DEBOUNCE_MS", 0),
-            rate_limit_per_min=_int("PYCLAUDIR_RATE_LIMIT_PER_MIN", 20),
-            attachment_max_bytes=_int("PYCLAUDIR_ATTACHMENT_MAX_BYTES", 20_000_000),
-            tool_error_max_count=_int("PYCLAUDIR_TOOL_ERROR_MAX_COUNT", 3),
-            tool_error_window_seconds=_float("PYCLAUDIR_TOOL_ERROR_WINDOW_SECONDS", 30.0),
-            progress_notify_seconds=_float("PYCLAUDIR_PROGRESS_NOTIFY_SECONDS", 60.0),
-            liveness_timeout_seconds=_float("PYCLAUDIR_LIVENESS_TIMEOUT_SECONDS", 300.0),
-            liveness_poll_seconds=_float("PYCLAUDIR_LIVENESS_POLL_SECONDS", 30.0),
-            crash_backoff_base=_float("PYCLAUDIR_CRASH_BACKOFF_BASE", 2.0),
-            crash_backoff_cap=_float("PYCLAUDIR_CRASH_BACKOFF_CAP", 64.0),
-            crash_limit=_int("PYCLAUDIR_CRASH_LIMIT", 10),
-            crash_window_seconds=_float("PYCLAUDIR_CRASH_WINDOW_SECONDS", 600.0),
-        )
+        platform = _env("PYCLAUDIR_PLATFORM", "telegram") or "telegram"
+        slack_owner_id = _env("SLACK_OWNER_ID")
+        tg_token, owner_id = _resolve_auth(platform, slack_owner_id)
+        return cls(**_from_env_kwargs(tg_token, owner_id, platform, slack_owner_id))
 
     @classmethod
     def for_test(cls, data_dir: Path) -> "Config":
-        """Build a Config with fixed values, ignoring environment variables.
-
-        Used by tests so they don't depend on whatever is set on the
-        machine running them.
-        """
+        """Config with fixed test values — no environment variable reads."""
         cfg = cls(
             telegram_bot_token="test-token",
             owner_id=0,
@@ -247,6 +275,17 @@ class Config:
             crash_backoff_cap=64.0,
             crash_limit=10,
             crash_window_seconds=600.0,
+            platform="telegram",
+            slack_bot_token=None,
+            slack_app_token=None,
+            slack_owner_id=None,
+            openwebui_api_url=None,
+            openwebui_api_key=None,
+            openwebui_kb_uuid=None,
+            atlassian_api_token=None,
+            github_token=None,
+            slack_workspace_url=None,
+            save_channel_messages=True,
         )
         # Tests use isolated tmp dirs — keep access.json inside data_dir
         # so each test gets its own copy and never touches the repo root.

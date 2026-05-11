@@ -32,11 +32,12 @@ async def insert_message(db: Database, msg: ChatMessage) -> None:
         INSERT OR REPLACE INTO messages
             (chat_id, message_id, user_id, username, first_name,
              direction, timestamp, text, reply_to_id, reply_to_text,
-             edited, deleted, raw_update_json)
+             edited, deleted, raw_update_json,
+             slack_channel_id, slack_message_ts)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                 COALESCE((SELECT edited FROM messages WHERE chat_id=? AND message_id=?), 0),
                 COALESCE((SELECT deleted FROM messages WHERE chat_id=? AND message_id=?), 0),
-                ?)
+                ?, ?, ?)
         """,
         (
             msg.chat_id,
@@ -54,11 +55,15 @@ async def insert_message(db: Database, msg: ChatMessage) -> None:
             msg.chat_id,
             msg.message_id,
             msg.raw_update_json,
+            msg.slack_channel_id,
+            msg.slack_message_ts,
         ),
     )
 
 
-async def mark_edited(db: Database, chat_id: int, message_id: int, new_text: str) -> None:
+async def mark_edited(
+    db: Database, chat_id: int, message_id: int, new_text: str
+) -> None:
     await db.execute(
         "UPDATE messages SET text=?, edited=1 WHERE chat_id=? AND message_id=?",
         (new_text, chat_id, message_id),
@@ -119,7 +124,14 @@ async def insert_tool_call(
         INSERT INTO tool_calls(tool_name, args_json, result_json, error, duration_ms, created_at)
         VALUES (?, ?, ?, ?, ?, ?)
         """,
-        (tool_name, args_json, result_json, error, duration_ms, _iso(datetime.now(timezone.utc))),
+        (
+            tool_name,
+            args_json,
+            result_json,
+            error,
+            duration_ms,
+            _iso(datetime.now(timezone.utc)),
+        ),
     )
 
 

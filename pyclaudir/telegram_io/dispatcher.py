@@ -598,6 +598,20 @@ class TelegramDispatcher:
         except Exception:
             log.exception("failed to register owner-scoped bot commands")
 
+    async def send_text(self, chat_id: int, text: str) -> None:
+        """Platform-agnostic send used by crash/giveup callbacks in __main__."""
+        try:
+            await self.bot.send_message(chat_id=chat_id, text=text)
+        except Exception as exc:
+            log.warning("send_text to %s failed: %s", chat_id, exc)
+
+    async def start_typing(self, chat_id: int) -> None:
+        """Platform-agnostic typing indicator."""
+        try:
+            await self.bot.send_chat_action(chat_id=chat_id, action="typing")
+        except Exception as exc:
+            log.warning("send_chat_action failed for chat %s: %s", chat_id, exc)
+
     async def stop(self) -> None:
         try:
             await self.application.updater.stop()

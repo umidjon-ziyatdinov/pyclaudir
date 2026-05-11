@@ -46,6 +46,10 @@ from .skills_store import SkillsStore
 from .telegram_io import TelegramDispatcher
 from .tools.base import ToolContext
 
+# Slack dispatcher imported lazily inside _async_main to avoid importing
+# slack-bolt when running in Telegram mode (keeps startup fast and avoids
+# an ImportError if slack-bolt is not installed).
+
 log = logging.getLogger("pyclaudir")
 
 
@@ -143,7 +147,9 @@ def _bootstrap_access(config: Config) -> None:
     access = load_access(config.access_path)
     log.info(
         "access: policy=%s, allowed_users=%d, allowed_chats=%d",
-        access.policy, len(access.allowed_users), len(access.allowed_chats),
+        access.policy,
+        len(access.allowed_users),
+        len(access.allowed_chats),
     )
 
 
@@ -172,14 +178,17 @@ def _build_stores(config: Config, db: Database, plugins: Plugins) -> _Stores:
     )
     instructions.ensure_dirs()
     skills = SkillsStore(
-        root=project_root / "skills", disabled=plugins.skills_disabled,
+        root=project_root / "skills",
+        disabled=plugins.skills_disabled,
     )
     skills.ensure_root()
     attachments = AttachmentStore(config.attachments_dir)
     renders = RenderStore(config.renders_dir)
     renders.ensure_root()
     rate_limiter = RateLimiter(
-        db=db, limit=config.rate_limit_per_min, owner_id=config.owner_id,
+        db=db,
+        limit=config.rate_limit_per_min,
+        owner_id=config.owner_id,
     )
     return _Stores(
         memory=memory,
@@ -189,6 +198,24 @@ def _build_stores(config: Config, db: Database, plugins: Plugins) -> _Stores:
         renders=renders,
         rate_limiter=rate_limiter,
     )
+
+
+def _build_wiki_mcp_servers(config: Config) -> dict[str, dict]:
+    """Return Atlassian Rovo and GitHub MCP entries when tokens are present."""
+    servers: dict[str, dict] = {}
+    if config.atlassian_api_token:
+        servers["atlassian"] = {
+            "type": "http",
+            "url": "https://mcp.atlassian.com/v1/mcp/authv2",
+            "headers": {"Authorization": f"Bearer {config.atlassian_api_token}"},
+        }
+    if config.github_token:
+        servers["github"] = {
+            "type": "http",
+            "url": "https://api.githubcopilot.com/mcp/",
+            "headers": {"Authorization": f"Bearer {config.github_token}"},
+        }
+    return servers
 
 
 def _build_external_mcp_config(
@@ -213,7 +240,8 @@ def _build_external_mcp_config(
             }
             log.info(
                 "mcp %s configured (type=stdio, command=%s)",
-                plugin.name, plugin.command,
+                plugin.name,
+                plugin.command,
             )
         else:  # http or sse — remote server, optional static auth headers
             entry: dict = {"type": plugin.type, "url": plugin.url}
@@ -222,7 +250,9 @@ def _build_external_mcp_config(
             extra_mcp[plugin.name] = entry
             log.info(
                 "mcp %s configured (type=%s, url=%s)",
-                plugin.name, plugin.type, plugin.url,
+                plugin.name,
+                plugin.type,
+                plugin.url,
             )
         mcp_allowed_tools.extend(plugin.allowed_tools)
     return extra_mcp, mcp_allowed_tools
@@ -243,7 +273,8 @@ def _compute_overdue_seconds(trigger_at: str, now_dt: datetime) -> float:
     rows return 0.0 so they fire immediately rather than wedging the loop."""
     try:
         trigger_dt = datetime.strptime(
-            trigger_at, "%Y-%m-%d %H:%M:%S",
+            trigger_at,
+            "%Y-%m-%d %H:%M:%S",
         ).replace(tzinfo=timezone.utc)
     except (ValueError, TypeError):
         return 0.0
@@ -261,10 +292,13 @@ async def _advance_or_close_reminder(db: Database, row: dict) -> None:
         from croniter import croniter
 
         next_dt = croniter(
-            cron_expr, datetime.now(timezone.utc),
+            cron_expr,
+            datetime.now(timezone.utc),
         ).get_next(datetime)
         await advance_recurring_reminder(
-            db, row["id"], next_dt.strftime("%Y-%m-%d %H:%M:%S"),
+            db,
+            row["id"],
+            next_dt.strftime("%Y-%m-%d %H:%M:%S"),
         )
     except ImportError:
         log.warning(
@@ -283,14 +317,16 @@ async def _fire_one_reminder(db: Database, engine: Engine, row: dict) -> None:
         f'<reminder id="{row["id"]}" chat_id="{row["chat_id"]}" '
         f'user_id="{row["user_id"]}">{row["text"]}</reminder>'
     )
-    await engine.submit(ChatMessage(
-        chat_id=row["chat_id"],
-        message_id=0,
-        user_id=row["user_id"],
-        direction="in",
-        timestamp=datetime.now(timezone.utc),
-        text=reminder_xml,
-    ))
+    await engine.submit(
+        ChatMessage(
+            chat_id=row["chat_id"],
+            message_id=0,
+            user_id=row["user_id"],
+            direction="in",
+            timestamp=datetime.now(timezone.utc),
+            text=reminder_xml,
+        )
+    )
     await _advance_or_close_reminder(db, row)
 
 
@@ -312,7 +348,8 @@ async def _reminder_loop(db: Database, engine: Engine) -> None:
         try:
             now_dt = datetime.now(timezone.utc)
             due = await fetch_due_reminders(
-                db, now_dt.strftime("%Y-%m-%d %H:%M:%S"),
+                db,
+                now_dt.strftime("%Y-%m-%d %H:%M:%S"),
             )
             fired = 0
             for row in due:
@@ -320,7 +357,8 @@ async def _reminder_loop(db: Database, engine: Engine) -> None:
                 if overdue < _REMINDER_MAX_DEFER and engine.is_busy():
                     log.info(
                         "deferring reminder #%d (overdue %.0fs, engine busy)",
-                        row["id"], overdue,
+                        row["id"],
+                        overdue,
                     )
                     continue
                 await _fire_one_reminder(db, engine, row)
@@ -332,13 +370,15 @@ async def _reminder_loop(db: Database, engine: Engine) -> None:
 
 
 def _install_signal_handlers(
-    worker: CcWorker, stop_event: asyncio.Event,
+    worker: CcWorker,
+    stop_event: asyncio.Event,
 ) -> None:
     """Wire SIGINT/SIGTERM to the same stop path. Tells the cc supervisor
     we're shutting down BEFORE it observes the subprocess exit (the SIGINT
     propagates to the same process group, so cc is exiting in parallel).
     Without this the supervisor treats the clean exit as a crash and
     respawns."""
+
     def _stop(*_a) -> None:
         log.info("signal received, shutting down")
         worker._stop_supervisor.set()
@@ -387,12 +427,16 @@ async def _async_main() -> None:
         attachment_store=stores.attachments,
         render_store=stores.renders,
         chat_titles=chat_titles,
+        openwebui_api_url=config.openwebui_api_url,
+        openwebui_api_key=config.openwebui_api_key,
+        openwebui_kb_uuid=config.openwebui_kb_uuid,
     )
 
     mcp = McpServer(
         ctx,
         db_logger=db_logger,
         disabled=plugins.builtin_tools_disabled,
+        platform=config.platform,
     )
     await mcp.start()
     log.info("mcp server live at %s", mcp.url)
@@ -401,8 +445,10 @@ async def _async_main() -> None:
     schema_path = tmpdir / "schema.json"
     schema_path.write_text(schema_json())
     extra_mcp, mcp_allowed_tools = _build_external_mcp_config(plugins)
+    extra_mcp.update(_build_wiki_mcp_servers(config))
     mcp_config_path = mcp.write_mcp_config(
-        tmpdir / "mcp.json", extra_servers=extra_mcp,
+        tmpdir / "mcp.json",
+        extra_servers=extra_mcp,
     )
     log.info("mcp config written to %s", mcp_config_path)
 
@@ -436,15 +482,15 @@ async def _async_main() -> None:
         if engine is not None and engine._turn.active_chats:
             for chat_id in engine._turn.active_chats:
                 try:
-                    await dispatcher.bot.send_message(chat_id=chat_id, text=user_text)
+                    await dispatcher.send_text(chat_id, user_text)
                 except Exception:
                     log.warning("crash notify to %s failed", chat_id, exc_info=True)
         owner_chat = config.owner_id
         if owner_chat not in (engine._turn.active_chats if engine else set()):
             try:
-                await dispatcher.bot.send_message(
-                    chat_id=owner_chat,
-                    text=f"CC error (attempt {attempt}). Check logs.",
+                await dispatcher.send_text(
+                    owner_chat,
+                    f"CC error (attempt {attempt}). Check logs.",
                 )
             except Exception:
                 log.warning("crash notify to owner failed", exc_info=True)
@@ -460,7 +506,7 @@ async def _async_main() -> None:
         chats_to_notify.add(config.owner_id)
         for chat_id in chats_to_notify:
             try:
-                await dispatcher.bot.send_message(chat_id=chat_id, text=user_text)
+                await dispatcher.send_text(chat_id, user_text)
             except Exception:
                 log.warning("giveup notify to %s failed", chat_id, exc_info=True)
 
@@ -468,34 +514,46 @@ async def _async_main() -> None:
     engine = None  # type: ignore[assignment]
 
     worker = CcWorker(
-        spec, config,
+        spec,
+        config,
         heartbeat=ctx.heartbeat,
-        on_crash=_on_cc_crash, on_giveup=_on_cc_giveup,
+        on_crash=_on_cc_crash,
+        on_giveup=_on_cc_giveup,
     )
     await worker.start()
     await worker.supervise()
 
-    # The dispatcher owns the bot, so we build it first, then hand a
-    # closure into the engine for the typing indicator.
-    dispatcher = TelegramDispatcher(  # type: ignore[arg-type]
-        config,
-        db,
-        engine=None,
-        chat_titles=chat_titles,
-        rate_limiter=stores.rate_limiter,
-    )
+    # Build the platform-appropriate dispatcher.
+    if config.platform == "slack":
+        from .slack_io import SlackDispatcher
+
+        dispatcher = SlackDispatcher(  # type: ignore[assignment]
+            config,
+            db,
+            engine=None,
+            chat_titles=chat_titles,
+            rate_limiter=stores.rate_limiter,
+        )
+    else:
+        dispatcher = TelegramDispatcher(  # type: ignore[arg-type]
+            config,
+            db,
+            engine=None,
+            chat_titles=chat_titles,
+            rate_limiter=stores.rate_limiter,
+        )
 
     async def _typing(chat_id: int) -> None:
         t0 = time.monotonic()
         try:
-            ok = await dispatcher.bot.send_chat_action(chat_id=chat_id, action="typing")
-            elapsed_ms = int((time.monotonic() - t0) * 1000)
+            await dispatcher.start_typing(chat_id)
             log.debug(
-                "send_chat_action chat=%s returned=%r elapsed=%dms",
-                chat_id, ok, elapsed_ms,
+                "start_typing chat=%s elapsed=%dms",
+                chat_id,
+                int((time.monotonic() - t0) * 1000),
             )
         except Exception as exc:
-            log.warning("send_chat_action failed for chat %s: %s", chat_id, exc)
+            log.warning("start_typing failed for chat %s: %s", chat_id, exc)
 
     async def _error_notify(
         chat_id: int,
@@ -503,15 +561,13 @@ async def _async_main() -> None:
         reply_to_message_id: int | None = None,
     ) -> None:
         try:
-            kwargs: dict = {"chat_id": chat_id, "text": text}
-            if reply_to_message_id:
-                kwargs["reply_to_message_id"] = reply_to_message_id
-            await dispatcher.bot.send_message(**kwargs)
+            await dispatcher.send_text(chat_id, text)
         except Exception as exc:
             log.warning("error notify failed for chat %s: %s", chat_id, exc)
 
     engine = Engine(
-        worker, config,
+        worker,
+        config,
         debounce_ms=config.debounce_ms,
         db=db,
         typing_action=_typing,
@@ -520,11 +576,12 @@ async def _async_main() -> None:
     await engine.start()
 
     reminder_task = asyncio.create_task(
-        _reminder_loop(db, engine), name="pyclaudir-reminders",
+        _reminder_loop(db, engine),
+        name="pyclaudir-reminders",
     )
 
     dispatcher.engine = engine
-    ctx.bot = dispatcher.bot
+    ctx.bot = dispatcher.bot  # telegram.Bot for Telegram, AsyncWebClient for Slack
     # Wire send_message → engine notification so the typing indicator
     # stops the moment the user has the message in their hand, not when
     # the entire CC turn officially ends.

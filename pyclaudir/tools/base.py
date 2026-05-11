@@ -76,7 +76,12 @@ class ToolContext:
     #: typing-indicator set so "typing..." vanishes as soon as the user has
     #: the message in their hand — not when the entire CC turn officially
     #: ends, which can be 5-10 seconds later.
-    on_chat_replied: Any = None  # Callable[[int], None] | None — kept untyped to avoid an import
+    on_chat_replied: Any = (
+        None  # Callable[[int], None] | None — kept untyped to avoid an import
+    )
+    openwebui_api_url: str | None = None
+    openwebui_api_key: str | None = None
+    openwebui_kb_uuid: str | None = None
 
 
 @dataclass
@@ -97,7 +102,9 @@ class ToolResult:
     content: str
     data: dict[str, Any] | None = None
     is_error: bool = False
-    image_path: Any = None  # pathlib.Path | None — left untyped to keep this module import-light
+    image_path: Any = (
+        None  # pathlib.Path | None — left untyped to keep this module import-light
+    )
 
 
 class BaseTool(ABC):
@@ -117,7 +124,7 @@ class BaseTool(ABC):
         self.ctx = ctx
 
     @abstractmethod
-    async def run(self, args: BaseModel) -> ToolResult:  # pragma: no cover - abstract
+    async def run(self, args: Any) -> ToolResult:  # pragma: no cover - abstract
         ...
 
 

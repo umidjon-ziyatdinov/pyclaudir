@@ -35,24 +35,50 @@ log = logging.getLogger(__name__)
 #: The MCP "server name" Claude sees. Tool names become ``mcp__<server>__<name>``.
 MCP_SERVER_NAME = "pyclaudir"
 
+#: Tools with Slack-specific replacements in ``tools/slack/``. Skipped from
+#: the main tools package when ``platform="slack"``.
+_TELEGRAM_ONLY_TOOLS: frozenset[str] = frozenset({
+    "send_message", "send_photo", "edit_message", "delete_message",
+    "add_reaction", "reply_to_message", "create_poll", "stop_poll",
+})
 
-def discover_tool_classes() -> list[type[BaseTool]]:
-    """Walk ``pyclaudir.tools`` and return every concrete BaseTool subclass."""
+
+def _discover_from_pkg(
+    pkg: Any,
+    *,
+    skip_modules: frozenset[str] = frozenset(),
+    seen: set[str] | None = None,
+) -> tuple[list[type[BaseTool]], set[str]]:
+    """Walk one package directory and collect concrete BaseTool subclasses."""
     found: list[type[BaseTool]] = []
-    seen: set[str] = set()
-    for mod_info in pkgutil.iter_modules(tools_pkg.__path__):
-        if mod_info.name in {"base", "__init__"}:
+    if seen is None:
+        seen = set()
+    for mod_info in pkgutil.iter_modules(pkg.__path__):
+        if mod_info.name in {"base", "__init__"} | skip_modules:
             continue
-        module = importlib.import_module(f"{tools_pkg.__name__}.{mod_info.name}")
+        module = importlib.import_module(f"{pkg.__name__}.{mod_info.name}")
         for _, obj in inspect.getmembers(module, inspect.isclass):
             if not issubclass(obj, BaseTool) or obj is BaseTool:
                 continue
-            if inspect.isabstract(obj):
-                continue
-            if obj.__name__ in seen:
+            if inspect.isabstract(obj) or obj.__name__ in seen:
                 continue
             seen.add(obj.__name__)
             found.append(obj)
+    return found, seen
+
+
+def discover_tool_classes(platform: str = "telegram") -> list[type[BaseTool]]:
+    """Return concrete BaseTool subclasses for the given platform.
+
+    For ``"slack"``: messaging tools come from ``tools/slack/``;
+    Telegram-only tools are excluded from the main ``tools/`` package.
+    """
+    skip = _TELEGRAM_ONLY_TOOLS if platform == "slack" else frozenset()
+    found, seen = _discover_from_pkg(tools_pkg, skip_modules=skip)
+    if platform == "slack":
+        import pyclaudir.tools.slack as slack_pkg
+        slack_found, _ = _discover_from_pkg(slack_pkg, seen=seen)
+        found.extend(slack_found)
     return found
 
 
@@ -131,6 +157,7 @@ def build_fastmcp(
     *,
     db_logger=None,
     disabled: frozenset[str] = frozenset(),
+    platform: str = "telegram",
 ) -> tuple[FastMCP, list[BaseTool]]:
     """Construct a FastMCP server with every discovered tool registered.
 
@@ -140,7 +167,7 @@ def build_fastmcp(
     raise ``ValueError`` so a typo in ``plugins.json`` fails boot
     loudly.
     """
-    classes = discover_tool_classes()
+    classes = discover_tool_classes(platform)
     if disabled:
         known = {cls.name for cls in classes}
         unknown = disabled - known
@@ -172,11 +199,12 @@ class McpServer:
         *,
         db_logger=None,
         disabled: frozenset[str] = frozenset(),
+        platform: str = "telegram",
     ) -> None:
         self._ctx = ctx
         self._db_logger = db_logger
         self.mcp, self.tools = build_fastmcp(
-            ctx, db_logger=db_logger, disabled=disabled,
+            ctx, db_logger=db_logger, disabled=disabled, platform=platform,
         )
         self._server: uvicorn.Server | None = None
         self._task = None
