@@ -69,6 +69,21 @@ async def _record_outbound(
     )
 
 
+def _resolve_channel(channel_id: str, chat_titles: dict[int, str]) -> str:
+    """Map an integer chat_id string back to a real Slack channel/DM string."""
+    if not channel_id.lstrip("-").isdigit():
+        return channel_id
+    title = chat_titles.get(int(channel_id), "")
+    return title.split(":", 1)[1] if ":" in title else channel_id
+
+
+def _resolve_ts(ts: str) -> str:
+    """Convert an integer message_id string back to a Slack ts (add the dot)."""
+    if "." in ts or not ts.isdigit() or len(ts) != 16:
+        return ts
+    return f"{ts[:10]}.{ts[10:]}"
+
+
 class SendMessageArgs(BaseModel):
     channel_id: str = Field(
         description="Slack channel ID (e.g. C012AB3CD) or DM channel."
@@ -91,18 +106,42 @@ class SendMessageTool(BaseTool):
     )
     args_model = SendMessageArgs
 
+    def _fire_reply_callback(self, channel: str) -> None:
+        if self.ctx.on_chat_replied is None:
+            return
+        try:
+            self.ctx.on_chat_replied(zlib.crc32(channel.encode()) & 0x7FFFFFFF)
+        except Exception:
+            pass
+
+    async def _finalize(
+        self, channel: str, pairs: list[tuple[str, str]], text: str
+    ) -> None:
+        first_ts = pairs[0][0]
+        log_outbound(
+            chat_id=zlib.crc32(channel.encode()) & 0x7FFFFFFF,
+            chat_titles=self.ctx.chat_titles,
+            message_id=int(first_ts.replace(".", "")),
+            reply_to_id=None,
+            text=text,
+        )
+        for ts, raw in pairs:
+            await _record_outbound(self.ctx, channel, ts, raw)
+
     async def run(self, args: SendMessageArgs) -> ToolResult:
         if self.ctx.bot is None:
             return ToolResult(content="bot not configured", is_error=True)
 
+        channel = _resolve_channel(args.channel_id, self.ctx.chat_titles)
+        thread_ts = _resolve_ts(args.thread_ts) if args.thread_ts else None
         raw_chunks = _chunk_text(args.text)
         timestamps: list[str] = []
 
         for i, chunk in enumerate(raw_chunks):
             body = markdown_to_slack(chunk)
-            kwargs: dict = {"channel": args.channel_id, "text": body, "mrkdwn": True}
-            if args.thread_ts:
-                kwargs["thread_ts"] = args.thread_ts
+            kwargs: dict = {"channel": channel, "text": body, "mrkdwn": True}
+            if thread_ts:
+                kwargs["thread_ts"] = thread_ts
                 if args.reply_broadcast and i == 0:
                     kwargs["reply_broadcast"] = True
             resp = await self.ctx.bot.chat_postMessage(**kwargs)
@@ -112,38 +151,19 @@ class SendMessageTool(BaseTool):
                 "slack send chunk=%d/%d channel=%s ts=%s",
                 i + 1,
                 len(raw_chunks),
-                args.channel_id,
+                channel,
                 ts,
             )
+            if i == 0:
+                self._fire_reply_callback(channel)
 
-            if i == 0 and self.ctx.on_chat_replied is not None:
-                try:
-                    chat_id = zlib.crc32(args.channel_id.encode()) & 0x7FFFFFFF
-                    self.ctx.on_chat_replied(chat_id)
-                except Exception:
-                    pass
-
+        await self._finalize(channel, list(zip(timestamps, raw_chunks)), args.text)
         first_ts = timestamps[0]
-        log_outbound(
-            chat_id=zlib.crc32(args.channel_id.encode()) & 0x7FFFFFFF,
-            chat_titles=self.ctx.chat_titles,
-            message_id=int(first_ts.replace(".", "")),
-            reply_to_id=None,
-            text=args.text,
-        )
-        for ts, raw in zip(timestamps, raw_chunks):
-            await _record_outbound(self.ctx, args.channel_id, ts, raw)
-
+        n = len(timestamps)
         content = (
-            f"sent ts={first_ts}"
-            if len(timestamps) == 1
-            else f"sent {len(timestamps)} chunks, first ts={first_ts}"
+            f"sent ts={first_ts}" if n == 1 else f"sent {n} chunks, first ts={first_ts}"
         )
         return ToolResult(
             content=content,
-            data={
-                "ts": first_ts,
-                "timestamps": timestamps,
-                "channel_id": args.channel_id,
-            },
+            data={"ts": first_ts, "timestamps": timestamps, "channel_id": channel},
         )

@@ -126,6 +126,7 @@ class SlackDispatcher:
         await self._ingest_event(event, client, is_dm=True)
 
     async def _on_app_mention(self, event: dict, client) -> None:
+        log.info("app_mention received user=%s channel=%s", event.get("user"), event.get("channel"))
         if _is_bot_event(event):
             return
         patched = dict(event)
