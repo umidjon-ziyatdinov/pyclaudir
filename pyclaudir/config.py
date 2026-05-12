@@ -89,6 +89,7 @@ def _from_env_kwargs(
         slack_bot_token=_env("SLACK_BOT_TOKEN"),
         slack_app_token=_env("SLACK_APP_TOKEN"),
         slack_owner_id=slack_owner_id,
+        slack_bot_name=_env("SLACK_BOT_NAME"),
         openwebui_api_url=_env("OPENWEBUI_API_URL"),
         openwebui_api_key=_env("OPENWEBUI_API_KEY"),
         openwebui_kb_uuid=_env("OPENWEBUI_KB_UUID"),
@@ -215,6 +216,10 @@ class Config:
     crash_window_seconds: float
 
     # ----- Wiki / RAG / external integration -----
+    #: Trigger name for channel messages — bot responds when this word appears
+    #: (whole-word match, case-insensitive). E.g. ``"lloyd"``.
+    #: Env var: ``SLACK_BOT_NAME``.
+    slack_bot_name: str | None = None
     openwebui_api_url: str | None = None  # OPENWEBUI_API_URL
     openwebui_api_key: str | None = None  # OPENWEBUI_API_KEY
     openwebui_kb_uuid: str | None = None  # OPENWEBUI_KB_UUID
@@ -279,6 +284,7 @@ class Config:
             slack_bot_token=None,
             slack_app_token=None,
             slack_owner_id=None,
+            slack_bot_name=None,
             openwebui_api_url=None,
             openwebui_api_key=None,
             openwebui_kb_uuid=None,

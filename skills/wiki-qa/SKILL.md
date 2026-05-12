@@ -61,11 +61,24 @@ where `ts_no_dot` is the `slack_message_ts` with the `.` removed.
 
 ## Step 6 — synthesise the answer
 
-Combine findings from Steps 2–5 into a concise answer. Rules:
+Give the direct answer first. Cite sources inline as part of the
+sentence, not as a list at the end. One sentence and a citation is
+enough when the answer is simple.
 
-- Lead with the direct answer; citations follow inline.
-- Include **at least one citation**. Prefer Confluence URL > Jira key >
-  Slack permalink > KB document name.
-- If sources contradict, note the conflict and cite both.
-- If nothing relevant was found, say so clearly — do not fabricate.
-- Keep the answer under 400 words unless the question demands detail.
+Cite priority: Confluence URL first, then Jira key, then Slack
+permalink, then KB document name. Always include at least one.
+
+If sources contradict each other, say so plainly: "Two conflicting
+docs on this." Then cite both and let the user decide.
+
+If a source is old (over 6 months), note it: "This page is from
+[date], might be outdated."
+
+If you spotted a related open Jira ticket or a stale doc while
+searching, add one short line about it after the main answer.
+
+If nothing relevant was found in any source, say: "Nothing in any
+source on this. Probably undocumented." Do not fabricate.
+
+Keep answers under 400 words unless the question genuinely needs
+more detail.

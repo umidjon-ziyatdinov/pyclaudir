@@ -79,6 +79,9 @@ class ToolContext:
     on_chat_replied: Any = (
         None  # Callable[[int], None] | None — kept untyped to avoid an import
     )
+    #: Fired with the Slack thread_ts string the moment the bot posts into a thread.
+    #: Slack dispatcher wires it to mark the thread active so continuations work.
+    on_thread_active: Any = None  # Callable[[str], None] | None
     openwebui_api_url: str | None = None
     openwebui_api_key: str | None = None
     openwebui_kb_uuid: str | None = None

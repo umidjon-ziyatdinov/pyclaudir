@@ -77,3 +77,10 @@ def strip_mention(text: str, bot_user_id: str) -> str:
     if stripped.startswith(prefix):
         stripped = stripped[len(prefix) :].lstrip()
     return stripped
+
+
+def contains_bot_name(text: str, name: str | None) -> bool:
+    """True if *name* appears as a whole word in *text* (case-insensitive)."""
+    if not name:
+        return False
+    return bool(re.search(rf"\b{re.escape(name)}\b", text, re.IGNORECASE))

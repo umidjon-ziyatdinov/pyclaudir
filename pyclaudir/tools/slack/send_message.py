@@ -106,13 +106,17 @@ class SendMessageTool(BaseTool):
     )
     args_model = SendMessageArgs
 
-    def _fire_reply_callback(self, channel: str) -> None:
-        if self.ctx.on_chat_replied is None:
-            return
-        try:
-            self.ctx.on_chat_replied(zlib.crc32(channel.encode()) & 0x7FFFFFFF)
-        except Exception:
-            pass
+    def _fire_reply_callback(self, channel: str, thread_ts: str | None) -> None:
+        if self.ctx.on_chat_replied is not None:
+            try:
+                self.ctx.on_chat_replied(zlib.crc32(channel.encode()) & 0x7FFFFFFF)
+            except Exception:
+                pass
+        if thread_ts and self.ctx.on_thread_active is not None:
+            try:
+                self.ctx.on_thread_active(thread_ts)
+            except Exception:
+                pass
 
     async def _finalize(
         self, channel: str, pairs: list[tuple[str, str]], text: str
@@ -155,7 +159,7 @@ class SendMessageTool(BaseTool):
                 ts,
             )
             if i == 0:
-                self._fire_reply_callback(channel)
+                self._fire_reply_callback(channel, thread_ts)
 
         await self._finalize(channel, list(zip(timestamps, raw_chunks)), args.text)
         first_ts = timestamps[0]

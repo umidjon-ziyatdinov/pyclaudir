@@ -535,7 +535,7 @@ async def _async_main() -> None:
             rate_limiter=stores.rate_limiter,
         )
     else:
-        dispatcher = TelegramDispatcher(  # type: ignore[arg-type]
+        dispatcher = TelegramDispatcher(  # type: ignore[arg-type,assignment]
             config,
             db,
             engine=None,
@@ -586,6 +586,8 @@ async def _async_main() -> None:
     # stops the moment the user has the message in their hand, not when
     # the entire CC turn officially ends.
     ctx.on_chat_replied = engine.notify_chat_replied
+    if config.platform == "slack":
+        ctx.on_thread_active = dispatcher.mark_thread_active  # type: ignore[union-attr]
     await dispatcher.start()
     log.info("pyclaudir is live")
 

@@ -39,8 +39,8 @@ Left sidebar: **Features → OAuth & Permissions** → scroll to **Bot Token Sco
 | `im:history` | Read DM history |
 | `im:write` | Open DMs with users |
 | `channels:history` | Read messages in channels the bot is added to |
+| `channels:read` | Receive member-join events |
 | `groups:history` | Read messages in private channels |
-| `app_mentions:read` | Receive @mention events |
 | `reactions:write` | Add emoji reactions |
 | `files:write` | Upload images/files |
 | `users:read` | Resolve user info (optional, for display names) |
@@ -59,8 +59,10 @@ Under **Subscribe to bot events**, add:
 | Event | Why |
 |-------|-----|
 | `message.im` | DMs to the bot |
-| `app_mention` | @mentions in channels |
+| `message.channels` | Messages in public channels (for @mention, name trigger, thread replies) |
+| `message.groups` | Messages in private channels |
 | `reaction_added` | Emoji reactions (logged to DB) |
+| `member_joined_channel` | Introduce the bot when a new person joins |
 
 > **Note**: Socket Mode does not need a public Request URL — leave it blank or set to any placeholder.
 
@@ -85,6 +87,10 @@ PYCLAUDIR_PLATFORM=slack
 SLACK_BOT_TOKEN=xoxb-your-bot-token
 SLACK_APP_TOKEN=xapp-your-app-level-token
 SLACK_OWNER_ID=U012AB3CD
+
+# Bot trigger name for channel messages (whole-word, case-insensitive)
+# e.g. "lloyd" → bot replies when anyone types "lloyd how are you"
+SLACK_BOT_NAME=lloyd
 
 # Claude settings (same as Telegram)
 PYCLAUDIR_MODEL=claude-opus-4-7
@@ -134,6 +140,16 @@ pyclaudir is live
 **@mention in a channel:**
 - Add the bot to a channel: `/invite @ClaudeAssistant`
 - Type `@ClaudeAssistant hello` — bot replies in-thread.
+
+**Name trigger:**
+- If `SLACK_BOT_NAME=lloyd` is set, typing `lloyd how are you` (anywhere in the message) triggers a response, without needing @mention.
+
+**Thread continuation:**
+- Once the bot replies in a thread, any follow-up message in that same thread will get a response — no need to @mention or say the name again.
+
+**Channel intro:**
+- When a new person joins a channel the bot is in, it posts a brief self-introduction.
+- If the join event is missed (e.g. bot was offline), the intro is posted on the user's first message instead.
 
 ---
 

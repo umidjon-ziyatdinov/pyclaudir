@@ -127,13 +127,25 @@ Rewrite `meta/_index.md` to reflect all topics now present.
 
 ## Completion
 
-After Phase 4, send a brief summary to the owner DM:
+After Phase 4, send a short message to the owner DM. Write it like a
+brief note to a colleague, not a log entry. What actually stood out
+today. What might need attention. One or two specific details, not
+just counts.
+
+Example shape (do not copy verbatim, adapt to what actually happened):
 
 ```
-Nightly wiki update complete.
-- Slack: <N> topics updated.
-- Confluence: <M> pages ingested, <K> unchanged.
-- Meta index rebuilt.
+[One honest sentence about the day's volume or tone]
+
+[One or two specific things that stood out, with a detail. A topic
+that keeps coming up. A conflict between docs. A Jira ticket that is
+overdue but frequently mentioned. A Slack decision that never reached
+Confluence.]
+
+[What was indexed and what was skipped, one short line.]
 ```
+
+If nothing interesting happened, say that plainly. "Quiet day. No
+conflicts, no surprises. Two Confluence pages indexed." is fine.
 
 Then `stop`.
