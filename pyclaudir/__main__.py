@@ -13,6 +13,7 @@ Then sleeps until interrupted, at which point everything is torn down.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import signal
 import tempfile
@@ -258,6 +259,16 @@ def _build_external_mcp_config(
     return extra_mcp, mcp_allowed_tools
 
 
+def _load_chat_titles(config: Config) -> dict[int, str]:
+    path = config.data_dir / "slack_chat_titles.json"
+    if not path.exists():
+        return {}
+    try:
+        return {int(k): v for k, v in json.loads(path.read_text()).items()}
+    except Exception:
+        return {}
+
+
 def _load_session_id(config: Config) -> str | None:
     """Resume the prior CC session if one was persisted on a clean shutdown."""
     if not config.session_id_path.exists():
@@ -417,7 +428,8 @@ async def _async_main() -> None:
         await insert_tool_call(db, **kwargs)
 
     # Shared between dispatcher (writer) and outbound tools (reader).
-    chat_titles: dict[int, str] = {}
+    # Loaded from disk so reminders can resolve channels after a restart.
+    chat_titles: dict[int, str] = _load_chat_titles(config)
     ctx = ToolContext(
         bot=None,  # filled in below once dispatcher exists
         database=db,

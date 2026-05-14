@@ -1,15 +1,14 @@
-"""Slack dispatcher — Bolt Socket Mode, mirrors TelegramDispatcher lifecycle.
-
-Owner ``!`` commands delegated to :mod:`pyclaudir.slack_io.commands`.
-"""
+"""Slack dispatcher — Bolt Socket Mode. Owner ``!`` commands delegated to :mod:`pyclaudir.slack_io.commands`."""
 
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 import zlib
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Protocol
 
 from slack_bolt.async_app import AsyncApp
@@ -66,6 +65,16 @@ def _is_bot_event(event: dict) -> bool:
     )
 
 
+_TITLES_FILE = "slack_chat_titles.json"
+
+
+def _save_chat_titles(path: Path, titles: dict[int, str]) -> None:
+    try:
+        path.write_text(json.dumps({str(k): v for k, v in titles.items()}))
+    except Exception as exc:
+        log.warning("failed to save chat_titles: %s", exc)
+
+
 class SlackDispatcher:
     def __init__(
         self,
@@ -79,9 +88,7 @@ class SlackDispatcher:
         self.config = config
         self.db = db
         self.engine: EnginePort | None = engine
-        self.chat_titles: dict[int, str] = (
-            chat_titles if chat_titles is not None else {}
-        )
+        self.chat_titles: dict[int, str] = chat_titles or {}
         self.rate_limiter = rate_limiter
         self._app = AsyncApp(token=config.slack_bot_token)
         self._handler: AsyncSocketModeHandler | None = None
@@ -105,12 +112,16 @@ class SlackDispatcher:
             log.warning("send_text to %s failed: %s", channel, exc)
 
     async def start_typing(self, chat_id: int) -> None:  # noqa: ARG002
-        """No-op — Slack bots cannot set typing indicators."""
+        pass  # Slack bots cannot set typing indicators
 
     def _wire_handlers(self) -> None:
         self._app.event("message")(self._on_message)
         self._app.event("reaction_added")(self._on_reaction_added)
         self._app.event("member_joined_channel")(self._on_member_joined)
+        self._app.event("app_mention")(self._on_app_mention)
+
+    async def _on_app_mention(self, event: dict, client) -> None:  # noqa: ARG002
+        pass  # handled via message event
 
     async def _on_message(self, event: dict, client) -> None:
         if _is_bot_event(event):
@@ -124,9 +135,8 @@ class SlackDispatcher:
     async def _handle_dm(self, event: dict, client) -> None:
         user, text = event.get("user", ""), event.get("text", "")
         if text.startswith("!") and self._is_owner(user):
-            await dispatch_command(
-                text[1:].strip(), event.get("channel", ""), client, self.config, self.db
-            )
+            ch = event.get("channel", "")
+            await dispatch_command(text[1:].strip(), ch, client, self.config, self.db)
             return
         await self._ingest_event(event, client, is_dm=True)
 
@@ -134,9 +144,8 @@ class SlackDispatcher:
         text = event.get("text") or ""
         bot_id = self._bot_user_id or ""
         if bot_id and f"<@{bot_id}>" in text:
-            patched = dict(event)
-            patched["text"] = strip_mention(text, bot_id)
-            await self._ingest_event(patched, client, is_dm=False)
+            e = {**event, "text": strip_mention(text, bot_id)}
+            await self._ingest_event(e, client, is_dm=False)
             return
         thread_ts = event.get("thread_ts")
         channel = event.get("channel", "")
@@ -155,8 +164,7 @@ class SlackDispatcher:
     async def _on_member_joined(self, event: dict, client) -> None:  # noqa: ARG002
         if event.get("user") == self._bot_user_id:
             return
-        channel = event.get("channel", "")
-        if channel:
+        if channel := event.get("channel", ""):
             await handle_joined(self._app.client, channel, self.config.slack_bot_name)
 
     async def _on_reaction_added(self, event: dict, client) -> None:  # noqa: ARG002
@@ -180,7 +188,10 @@ class SlackDispatcher:
                 cm = cm.model_copy(
                     update={"text": f"{cm.text}\n{suffix}" if cm.text else suffix}
                 )
-        self.chat_titles[cm.chat_id] = f"{'DM' if is_dm else 'CH'}:{channel}"
+        label = f"{'DM' if is_dm else 'CH'}:{channel}"
+        if self.chat_titles.get(cm.chat_id) != label:
+            self.chat_titles[cm.chat_id] = label
+            _save_chat_titles(self.config.data_dir / _TITLES_FILE, self.chat_titles)
         await self._persist_inbound(cm)
 
         if not self._check_access(cm, is_dm):
@@ -191,19 +202,14 @@ class SlackDispatcher:
             log.error("dispatcher received message before engine was attached")
             return
         self.engine.prime_typing(cm.chat_id)
-        log.info(
-            "hot-path stage=submit chat=%s msg=%s t_ms=%d",
-            cm.chat_id,
-            cm.message_id,
-            int((time.monotonic() - received_at) * 1000),
-        )
+        t_ms = int((time.monotonic() - received_at) * 1000)
+        log.info("submit chat=%s msg=%s t_ms=%d", cm.chat_id, cm.message_id, t_ms)
         await self.engine.submit(cm)
 
     def _build_chat_message(self, event: dict) -> ChatMessage | None:
         user_str = event.get("user", "")
         channel = event.get("channel", "")
-        ts = event.get("ts", "")
-        if not (user_str and channel and ts):
+        if not (user_str and channel and (ts := event.get("ts", ""))):
             return None
         text, flags = _clean(event.get("text") or "")
         return ChatMessage(
@@ -263,10 +269,7 @@ class SlackDispatcher:
                 try:
                     await self._app.client.chat_postMessage(
                         channel=cm.username or str(cm.chat_id),
-                        text=(
-                            f"You're sending messages too fast ({exc.limit}/min). "
-                            f"Try again in ~{exc.retry_after_s}s."
-                        ),
+                        text=f"Too fast: {exc.limit}/min, wait {exc.retry_after_s}s.",
                     )
                 except Exception:
                     pass
