@@ -27,7 +27,7 @@ def _crc(s: str) -> int:
 async def is_new_channel_user(db: Database, user_id: int, chat_id: int) -> bool:
     """True if the user has no prior messages in this channel."""
     row = await db.fetch_one(
-        "SELECT id FROM messages WHERE chat_id=? AND user_id=? LIMIT 1",
+        "SELECT 1 FROM messages WHERE chat_id=? AND user_id=? LIMIT 1",
         (chat_id, user_id),
     )
     return row is None
