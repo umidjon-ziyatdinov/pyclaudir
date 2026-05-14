@@ -94,6 +94,7 @@ class SlackDispatcher:
         self._handler: AsyncSocketModeHandler | None = None
         self._bot_user_id: str | None = None
         self._active_threads: set[str] = set()
+        self._seen_ts: set[str] = set()
         self._wire_handlers()
 
     @property
@@ -104,7 +105,6 @@ class SlackDispatcher:
         self._active_threads.add(ts)
 
     async def send_text(self, chat_id: int, text: str) -> None:
-        """Platform-agnostic send used by crash/giveup callbacks."""
         channel = self.config.slack_owner_id or str(chat_id)
         try:
             await self._app.client.chat_postMessage(channel=channel, text=text)
@@ -120,14 +120,14 @@ class SlackDispatcher:
         self._app.event("member_joined_channel")(self._on_member_joined)
         self._app.event("app_mention")(self._on_app_mention)
 
-    async def _on_app_mention(self, event: dict, client) -> None:  # noqa: ARG002
-        pass  # handled via message event
+    async def _on_app_mention(self, event: dict, client) -> None:
+        text = strip_mention(event.get("text") or "", self._bot_user_id or "")
+        await self._ingest_event({**event, "text": text}, client, is_dm=False)
 
     async def _on_message(self, event: dict, client) -> None:
         if _is_bot_event(event):
             return
-        ct = event.get("channel_type", "")
-        if ct == "im":
+        if (ct := event.get("channel_type", "")) == "im":
             await self._handle_dm(event, client)
         elif ct in ("channel", "group"):
             await self._handle_channel_msg(event, client)
@@ -172,13 +172,18 @@ class SlackDispatcher:
         log.debug("reaction_added: emoji=%s ts=%s", event.get("reaction"), item_ts)
 
     async def _ingest_event(self, event: dict, client, *, is_dm: bool) -> None:  # noqa: ARG002
+        if (ts := event.get("ts", "")) in self._seen_ts:
+            return
+        self._seen_ts.add(ts)
+        if len(self._seen_ts) > 500:
+            self._seen_ts.clear()
         received_at = time.monotonic()
         cm = self._build_chat_message(event)
         if cm is None:
             return
 
         bot, channel = self._app.client, event.get("channel", "")
-        ts, files = event.get("ts", ""), event.get("files") or []
+        files = event.get("files") or []
         if files:
             markers = await process_slack_files(
                 files, channel_id=channel, message_ts=ts, client=bot, config=self.config
@@ -225,10 +230,9 @@ class SlackDispatcher:
         )
 
     async def _persist_inbound(self, cm: ChatMessage) -> None:
-        await insert_message(self.db, cm)
-        await upsert_user(
-            self.db, cm.chat_id, cm.user_id, cm.username, None, cm.timestamp
-        )
+        db = self.db
+        await insert_message(db, cm)
+        await upsert_user(db, cm.chat_id, cm.user_id, cm.username, None, cm.timestamp)
 
     def _check_access(self, cm: ChatMessage, is_dm: bool) -> bool:
         owner_int = _int_id(self.config.slack_owner_id or "")
@@ -240,12 +244,9 @@ class SlackDispatcher:
         elif access.policy == "open":
             allowed = True
         else:
-            allowed = (
-                is_dm and cm.user_id in {_int_id(str(u)) for u in access.allowed_users}
-            ) or (
-                not is_dm
-                and cm.chat_id in {_int_id(str(c)) for c in access.allowed_chats}
-            )
+            au = {_int_id(str(u)) for u in access.allowed_users}
+            ac = {_int_id(str(c)) for c in access.allowed_chats}
+            allowed = (is_dm and cm.user_id in au) or (not is_dm and cm.chat_id in ac)
         log_inbound(
             chat_id=cm.chat_id,
             chat_type="im" if is_dm else "channel",
@@ -285,9 +286,8 @@ class SlackDispatcher:
         resp = await self._app.client.auth_test()
         self._bot_user_id = resp["user_id"]
         log.info("slack bot: %s (%s)", resp.get("user"), self._bot_user_id)
-        self._handler = AsyncSocketModeHandler(
-            self._app, self.config.slack_app_token or ""
-        )
+        tok = self.config.slack_app_token or ""
+        self._handler = AsyncSocketModeHandler(self._app, tok)
         asyncio.create_task(self._handler.start_async(), name="pyclaudir-slack-socket")
         log.info("slack dispatcher started (socket mode)")
 
