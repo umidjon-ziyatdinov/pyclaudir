@@ -11,6 +11,22 @@ def _utcnow_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
 
+def _normalise_trigger_at(trigger_at: str) -> str:
+    """Normalise any ISO-8601 variant to 'YYYY-MM-DD HH:MM:SS' (UTC, space separator).
+
+    SQLite compares datetime strings lexicographically, so a stored value of
+    '2026-05-14T08:59:00Z' is always greater than '2026-05-14 08:59:00' (T > space
+    in ASCII). All trigger_at values must be in the space format to compare correctly.
+    """
+    try:
+        dt = datetime.fromisoformat(trigger_at.replace("Z", "+00:00"))
+        # Convert to UTC then strip timezone for storage
+        utc = dt.astimezone(timezone.utc)
+        return utc.strftime("%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return trigger_at
+
+
 async def insert_reminder(
     db: Database,
     *,
@@ -26,7 +42,14 @@ async def insert_reminder(
         INSERT INTO reminders (chat_id, user_id, text, trigger_at, cron_expr, status, created_at)
         VALUES (?, ?, ?, ?, ?, 'pending', ?)
         """,
-        (chat_id, user_id, text, trigger_at, cron_expr, _utcnow_iso()),
+        (
+            chat_id,
+            user_id,
+            text,
+            _normalise_trigger_at(trigger_at),
+            cron_expr,
+            _utcnow_iso(),
+        ),
     )
     await db.connection.commit()
     return cursor.lastrowid  # type: ignore[return-value]
@@ -35,7 +58,8 @@ async def insert_reminder(
 async def fetch_due_reminders(db: Database, now_utc: str) -> list:
     """Return all pending reminders whose trigger_at <= now_utc."""
     return await db.fetch_all(
-        "SELECT * FROM reminders WHERE status = 'pending' AND trigger_at <= ?",
+        "SELECT * FROM reminders WHERE status = 'pending'"
+        " AND datetime(trigger_at) <= datetime(?)",
         (now_utc,),
     )
 
@@ -128,7 +152,15 @@ async def insert_auto_seeded_reminder(
         )
         VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)
         """,
-        (chat_id, user_id, text, trigger_at, cron_expr, _utcnow_iso(), auto_seed_key),
+        (
+            chat_id,
+            user_id,
+            text,
+            _normalise_trigger_at(trigger_at),
+            cron_expr,
+            _utcnow_iso(),
+            auto_seed_key,
+        ),
     )
     await db.connection.commit()
     return cursor.lastrowid  # type: ignore[return-value]

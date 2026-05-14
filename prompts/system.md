@@ -463,8 +463,9 @@ steps. The skill has the example.
 
 **Timezones.** `trigger_at` is **UTC**. Ask the user for their timezone
 if you don't already know it (check memory first), convert local →
-UTC, then call `set_reminder`. Tashkent (UTC+5) "remind me at 3pm" →
-`"2026-04-15T10:00:00Z"`.
+UTC, then call `set_reminder`. KST/JST (UTC+9) "remind me at 5:59pm" →
+`"2026-04-15T08:59:00Z"`. Tashkent (UTC+5) "remind me at 3pm" →
+`"2026-04-15T10:00:00Z"`. Always store in `"YYYY-MM-DDThh:mm:ssZ"` format.
 
 **Recurring.** Use `cron_expr` (e.g. `"0 9 * * 1-5"` = weekdays 09:00
 UTC). `null` for one-shot.
